@@ -1,0 +1,50 @@
+from sklearn import preprocessing
+from snn_object_based import SinDense
+from snn_one_class import NeuralNetwork,probabilityDimension
+import pandas as pd
+
+#import dataset, download manually from kaggle https://www.kaggle.com/c/digit-recognizer
+df_train = pd.read_csv('./digit_dataset/mnist_train.csv').values
+train_images = df_train[:,1:]/255+0.01
+train_labels = df_train[:,0].reshape((train_images.shape[0],1))
+lb = preprocessing.LabelBinarizer()
+lb.fit(train_labels)
+train_labels_binary = lb.transform(train_labels)
+
+#Training of one class snn
+
+prob_dim = probabilityDimension()
+nn = NeuralNetwork(train_images.shape,train_labels_binary.shape,number_of_layers = 1,layers_shapes = [128])
+for epoch in range(0,30): 
+    for cnt in range(start,50000):
+        #sample = prob_dim.createProbOfVal(train_images[cnt],5) #uncomment this to create probability dimensions before feedforward
+        sample = train_images_out[cnt] #comment this to create probability dimensions before feedforward
+        for _ in range(1): # for retraining the same sample
+            print('Epoch: {}'.format(gen_cnt),'Sample: {}'.format(cnt),"Label:",np.argmax(train_labels_binary[cnt]),"...")
+            out1,out_act1 = nn.feedforward(sample)
+            error1 =  np.around(train_labels_binary[cnt]-out1,decimals=5)
+            error1 =  np.max(np.abs(error1))
+            nn.backprop(sample,train_labels_binary[cnt],learning_rate = 0.0001) #0.000000002 for 2048, digits
+            out2,out_act2 = nn.feedforward(sample)
+            error2 =  np.around(train_labels_binary[cnt]-out2,decimals=5)
+            error2 =  np.max(np.abs(error2))
+            print("Error 1:",error1,"Error 2:",error2)
+
+#Training of object oriented snn
+sd1 = SinDense(256)
+sd2 = SinDense(64)
+sd3 = SinDense(10)
+
+for epoch in range(1):
+    for cnt in range(2,3):
+        for reroll in range(20):
+            out1 = sd1.forward(train_images[cnt])
+            out2 = sd2.forward(out1)
+            out3 = sd3.forward(out2)
+            
+            error = train_labels_binary[cnt]-out3
+            print(np.max(error))
+
+            error3 = sd3.backprop(error,learning_rate = 0.001)
+            error2 = sd2.backprop(error3,learning_rate = 0.001)
+            error1 = sd1.backprop(error2,learning_rate = 0.001)
