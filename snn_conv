@@ -1,0 +1,127 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec 26 11:38:29 2019
+
+@author: evrim
+"""
+
+import numpy as np
+from sklearn import preprocessing
+import pandas as pd
+
+class SinDense:
+    def __init__(self,layer_size):
+        self.layer_size = layer_size
+        self.weights_in = False
+        self.weights_out = False
+
+    @staticmethod
+    def dlayer_dlayer_func(layer,weights_in,weights_out):
+        return weights_out*np.sin(np.pi*layer*weights_in)+np.pi*layer*weights_in*weights_out*np.cos(np.pi*layer*weights_in)
+    
+    @staticmethod
+    def dlayer_dweights_func(in_,weights_in,weights_out):
+        doutput_dweights_in = weights_out * np.square(in_) * np.pi * np.cos(np.pi*in_*weights_in)
+        doutput_dweights_out = in_*np.sin(np.pi*in_*weights_in)
+        return doutput_dweights_in,doutput_dweights_out
+
+    def forward(self,input):
+        if type(self.weights_in) == bool:
+            self.weights_in = np.random.uniform(-0.3, 0.3,(self.layer_size,input.shape[0]))
+            self.weights_out = np.random.uniform(-0.3, 0.3,(self.layer_size,input.shape[0]))
+        
+        out = np.sum(self.weights_out*input*np.sin(np.pi*input*self.weights_in),axis = 1)
+        return out
+    
+    def backprop(self,derror_dout,last_input,learning_rate = 0.05):
+        last_weights_in = self.weights_in
+        last_weights_out = self.weights_out
+        
+        dout_dlayer = self.dlayer_dlayer_func(last_input,last_weights_in,last_weights_out)
+        dout_dweights_in,dout_dweights_out = self.dlayer_dweights_func(last_input,last_weights_in,last_weights_out)
+        
+        derror_dlayer = np.dot(derror_dout,dout_dlayer)
+        derror_dweights_in = derror_dout*dout_dweights_in.T
+        derror_dweights_out = derror_dout*dout_dweights_out.T
+        
+        self.weights_in += derror_dweights_in.T*learning_rate
+        self.weights_out += derror_dweights_out.T*learning_rate
+        return derror_dlayer
+
+class SinConv(SinDense): #SinDense is parent class
+    def __init__(self, num_filters,filter_shape = [3,3]):
+        self.num_filters = num_filters
+        self.filter_shape = filter_shape
+        self.filters = False
+        self.SinDense = SinDense
+    
+    def defineFilterClasses(self,Row,Column,Channel):
+        #filterClassShape = shape of output matrix
+        filterClasses = []
+        for chan in range(Channel):
+            filterClassesElm = []
+            sd = SinDense(1)
+            for row in range(Row):
+                filterClassesElm.append([])
+                for col in range(Column):
+                    filterClassesElm[-1].append(sd) #Append SinDense instances to list for each filter.
+            filterClasses.append(filterClassesElm)
+        return filterClasses #This is actually not filters but list of SinDense instances
+                            
+    def forward(self,img):
+        self.last_input = img
+        r_img,c_img,chani = img.shape
+        N,r_filt,c_filt,chanf = self.num_filters,self.filter_shape[0],self.filter_shape[1],chani
+        if type(self.filters) == bool:
+            self.filters = self.defineFilterClasses(r_img-(r_filt-1),c_img-(c_filt-1),self.num_filters)
+            self.filters = np.moveaxis(np.array(self.filters),0,2)
+            
+        processed = np.zeros((r_img-(r_filt-1),c_img-(c_filt-1),N))
+        for n in range(N):
+            for row in range(r_img-(r_filt-1)):
+                for col in range(c_img-(c_filt-1)):
+                    kernel = img[row:row+r_filt,col:col+c_filt]
+                    processed[row,col,n] = self.filters[row,col,n].forward(kernel.flatten()) #perform forward operation in SinDense instances
+        return processed
+
+    def backprop(self,derror_dout,learning_rate = 0.05):
+        last_input = self.last_input
+        d_L_d_input = np.zeros(last_input.shape)
+        r_img,c_img,chani = last_input.shape
+        N,r_filt,c_filt,chanf = self.num_filters,self.filter_shape[0],self.filter_shape[1],chani
+        for n in range(N):
+            for row in range(r_img-(r_filt-1)):
+                for col in range(c_img-(c_filt-1)):
+                    kernel = last_input[row:row+r_filt,col:col+c_filt]
+                    for chan in range(chanf):
+                        d_L_d_input[row:row+r_filt,col:col+c_filt,chan] = self.filters[row,col,n].backprop(derror_dout[row,col,n],kernel.flatten()).reshape((kernel.shape[0],kernel.shape[1]))    
+        return d_L_d_input
+
+### Define Model ###
+sd1 = SinConv(num_filters = 16,filter_shape = [3,3])
+sd2 = SinDense(64)
+sd3 = SinDense(10)
+
+#import dataset
+df_train = pd.read_csv('./digit_dataset/mnist_train.csv').values
+train_images = df_train[:,1:]/255+0.01
+train_labels = df_train[:,0].reshape((train_images.shape[0],1))
+lb = preprocessing.LabelBinarizer()
+lb.fit(train_labels)
+train_labels_binary = lb.transform(train_labels)
+
+for epoch in range(2): #epoch
+    for cnt in range(0,100):
+        for reroll in range(3):
+            out1 = sd1.forward(train_images[cnt].reshape(28,28,1))
+            out2 = sd2.forward(out1.flatten())
+            out3 = sd3.forward(out2)
+            
+            error = train_labels_binary[cnt]-out3
+            print("Max Error:", np.max(error))
+            print("As-Is",np.argmax(train_labels_binary[cnt]))
+            print("To-Be",np.argmax(out3))
+            
+            error3 = sd3.backprop(error,out2,learning_rate = 0.002)
+            error2 = sd2.backprop(error3,out1.flatten(),learning_rate = 0.002).reshape(out1.shape)
+            error1 = sd1.backprop(error2,learning_rate = 0.002)
