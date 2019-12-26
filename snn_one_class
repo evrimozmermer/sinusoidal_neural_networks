@@ -1,0 +1,175 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Dec 25 13:53:16 2019
+
+@author: evrim
+"""
+
+import numpy as np
+from sklearn import preprocessing
+import matplotlib.pyplot as plt
+import pandas as pd
+from skimage import exposure
+from sklearn.model_selection import train_test_split
+import time
+
+class probabilityDimension:
+    def __init__(self):
+        pass
+    
+    def distFunc(self,argmax,xrange,valRange):
+        x = np.linspace(0,valRange,valRange+1)
+        a = argmax
+        b = xrange
+        y = ((x**2)-(2*x*a)+(a**2)-(b**2))/(valRange**2)
+        return 1-y
+    
+    def createProbOfVal(self,kernel,valRange):
+        if len(kernel.shape) == 2:
+            kernelFlat = kernel.flatten()
+        elif len(kernel.shape) == 1:
+            kernelFlat = kernel
+        kernelFlat = kernelFlat/np.max(kernelFlat)*valRange
+        tempBefore = np.zeros((valRange+1,len(kernelFlat)))
+        tempAfter = np.zeros((valRange+1,len(kernelFlat)))
+        for cnt in range(len(kernelFlat)):
+            y = self.distFunc(int(kernelFlat[cnt]),1,valRange)
+            yhist = exposure.rescale_intensity(y)
+            tempBefore[int(kernelFlat[cnt]),cnt] = 1
+            tempAfter[:,cnt] = yhist
+        temp = tempAfter
+        tempFlat = temp.flatten()
+        return tempFlat
+
+    def prepareDataset(self,datasetImages):
+        dataset = []
+        for cnt in range(len(datasetImages)):
+            print(cnt, "processing...")
+            processedImage = self.createProbOfVal(datasetImages[cnt],5)
+            dataset.append(processedImage)
+        return dataset
+
+class NeuralNetwork:
+    #DEFINE INITIALS
+    def __init__(self, x_shape, y_shape, number_of_layers = 2,layers_shapes = [32,32]):
+        self.x_shape = x_shape
+        self.y_shape = y_shape
+        self.number_of_layers = number_of_layers
+        self.layers = []
+        for cnt in range(self.number_of_layers):    
+            self.layers.append(np.zeros((1,layers_shapes[cnt])))
+        
+        vrw = [-0.5,0.5]
+        self.weights_in = []
+        self.weights_out = []
+        for cnt in range(number_of_layers+1):
+            if cnt == 0:
+                self.weights_in.append(np.random.uniform(vrw[0], vrw[1],(self.layers[cnt].shape[1],self.x_shape[1])))
+                self.weights_out.append(np.random.uniform(vrw[0], vrw[1],(self.layers[cnt].shape[1],self.x_shape[1])))
+                print("1",cnt)
+            elif cnt == number_of_layers:
+                self.weights_in.append(np.random.uniform(vrw[0], vrw[1],(self.y_shape[1],self.layers[cnt-1].shape[1])))
+                self.weights_out.append(np.random.uniform(vrw[0], vrw[1],(self.y_shape[1],self.layers[cnt-1].shape[1])))
+                print("2",cnt)
+            else:
+                self.weights_in.append(np.random.uniform(vrw[0], vrw[1],(self.layers[cnt].shape[1],self.layers[cnt-1].shape[1])))
+                self.weights_out.append(np.random.uniform(vrw[0], vrw[1],(self.layers[cnt].shape[1],self.layers[cnt-1].shape[1])))
+                print("3",cnt)
+        self.output = np.random.uniform(0, 1,(1,self.y_shape[1]))
+        
+        #DEFINE FEEDFORWARD FUNCTION
+    def feedforward(self,x):
+        for cnt in range(self.number_of_layers+1):
+            if cnt == 0:
+                self.layers[cnt] = np.sum(self.weights_out[cnt]*x*np.sin(np.pi*x*self.weights_in[cnt]),axis = 1)
+            elif cnt == self.number_of_layers:
+                self.output = np.sum(self.weights_out[cnt]*self.layers[cnt-1]*np.sin(np.pi*self.layers[cnt-1]*self.weights_in[cnt]),axis = 1)
+                output_act = np.sin((np.pi/2)*self.output)
+            else:
+                self.layers[cnt] = np.sum(self.weights_out[cnt]*self.layers[cnt-1]*np.sin(np.pi*self.layers[cnt-1]*self.weights_in[cnt]),axis = 1)
+        return self.output,output_act
+    
+    @staticmethod
+    def dlayer_dlayer_func(layer,weights_in,weights_out):
+        return weights_out*np.sin(np.pi*layer*weights_in)+np.pi*layer*weights_in*weights_out*np.cos(np.pi*layer*weights_in)
+    
+    @staticmethod
+    def dlayer_dweights_func(in_,weights_in,weights_out):
+        doutput_dweights_in = weights_out * np.square(in_) * np.pi * np.cos(np.pi*in_*weights_in)
+        doutput_dweights_out = in_*np.sin(np.pi*in_*weights_in)
+        return doutput_dweights_in,doutput_dweights_out
+
+    #DEFINE BACKPROPAGATION
+    def backprop(self,x,y,learning_rate = 0.002):
+        #self.output[np.where(self.output<0.1)] = 0
+        derror_doutput = y-self.output
+        #derror_doutput = self.error_function_for_sin_multiple(self.output,y)
+        ##############___NEW___###############
+        doutput_or_layer_dlayer = [[] for cnt in range(len(self.layers))]
+        derror_dlayer = [[] for cnt in range(len(self.layers))]
+        for cnt in range(self.number_of_layers-1,-1,-1):
+            if cnt == self.number_of_layers-1:
+                doutput_or_layer_dlayer[cnt] = self.dlayer_dlayer_func(self.layers[cnt],self.weights_in[cnt+1],self.weights_out[cnt+1])
+                derror_dlayer[cnt] = np.dot(derror_doutput,doutput_or_layer_dlayer[cnt])
+            else:
+                doutput_or_layer_dlayer[cnt] = self.dlayer_dlayer_func(self.layers[cnt],self.weights_in[cnt+1],self.weights_out[cnt+1])
+                derror_dlayer[cnt] = np.dot(derror_dlayer[cnt+1],doutput_or_layer_dlayer[cnt])
+                
+        dlayer_dweights_out = [[] for cnt in range(len(self.weights_in))]
+        dlayer_dweights_in = [[] for cnt in range(len(self.weights_in))]
+        derror_dweights_in = [[] for cnt in range(len(self.weights_in))]
+        derror_dweights_out = [[] for cnt in range(len(self.weights_in))]
+        for cnt in range(self.number_of_layers-1,-2,-1):
+            if cnt == -1:
+                dlayer_dweights_in[cnt+1],dlayer_dweights_out[cnt+1] = self.dlayer_dweights_func(x,self.weights_in[cnt+1],self.weights_out[cnt+1])
+                derror_dweights_in[cnt+1] = derror_dlayer[cnt+1]*dlayer_dweights_in[cnt+1].T
+                derror_dweights_out[cnt+1] = derror_dlayer[cnt+1]*dlayer_dweights_out[cnt+1].T
+            elif cnt == self.number_of_layers-1:
+                dlayer_dweights_in[cnt+1],dlayer_dweights_out[cnt+1] = self.dlayer_dweights_func(self.layers[cnt],self.weights_in[cnt+1],self.weights_out[cnt+1])
+                derror_dweights_in[cnt+1] = derror_doutput*dlayer_dweights_in[cnt+1].T
+                derror_dweights_out[cnt+1] = derror_doutput*dlayer_dweights_out[cnt+1].T
+            else:
+                dlayer_dweights_in[cnt+1],dlayer_dweights_out[cnt+1] = self.dlayer_dweights_func(self.layers[cnt],self.weights_in[cnt+1],self.weights_out[cnt+1])
+                derror_dweights_in[cnt+1] = derror_dlayer[cnt+1]*dlayer_dweights_in[cnt+1].T
+                derror_dweights_out[cnt+1] = derror_dlayer[cnt+1]*dlayer_dweights_out[cnt+1].T
+        
+        for cnt in range(self.number_of_layers-1,-2,-1):
+            self.weights_in[cnt+1] += derror_dweights_in[cnt+1].T*learning_rate
+            self.weights_out[cnt+1] += derror_dweights_out[cnt+1].T*learning_rate         
+
+    @staticmethod
+    def error_function_for_sin_single(output,y):
+        to_search_max = np.sin(np.linspace(output-1,output+1,10000)*np.pi/2)
+        index = np.argmin(np.abs(to_search_max-y))
+        to_be = np.linspace(output-1,output+1,10000)[index]
+        error = to_be-output
+        #print("to be:",to_be,"as is",output,"error",error/10)
+        return error
+
+    def error_function_for_sin_multiple(self,output,y):
+        derror_doutput = []
+        for cnt in range(y.shape[0]):
+            derror_doutput.append(self.error_function_for_sin_single(output[cnt],y[cnt]))
+        derror_doutput = np.array(derror_doutput)
+        #print("____________")
+        return derror_doutput
+
+    #SAVE WEIGHTS
+    def save_weights(self,directory):
+        for cnt in range(len(self.weights_in)):
+            np.save(directory+"weights_in_{}".format(cnt),self.weights_in[cnt])
+            np.save(directory+"weights_out_{}".format(cnt),self.weights_out[cnt])
+        
+    #IMPORT WEIGHTS
+    def load_weights(self,directory):
+        for cnt in range(len(self.weights_in)):
+            self.weights_in[cnt] = np.load(directory+"weights_in_{}.npy".format(cnt))
+            self.weights_out[cnt] = np.load(directory+"weights_out_{}.npy".format(cnt))
+        
+    def predict(self,test_x):
+        predictions = []
+        for elm in test_x:
+            #print('___',elm)
+            result_local = self.feedforward(elm)[1]
+            predictions.append(result_local.tolist())
+        return np.array(predictions)
