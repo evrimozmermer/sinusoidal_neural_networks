@@ -1,0 +1,54 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec 26 11:38:29 2019
+
+@author: evrim
+"""
+
+import numpy as np
+from sklearn import preprocessing
+import pandas as pd
+import time
+
+class SinDense:
+    def __init__(self,layer_size):
+        self.layer_size = layer_size
+        self.weights_in = False
+        self.weights_out = False
+
+    @staticmethod
+    def dlayer_dlayer_func(layer,weights_in,weights_out):
+        return weights_out*np.sin(np.pi*layer*weights_in)+np.pi*layer*weights_in*weights_out*np.cos(np.pi*layer*weights_in)
+    
+    @staticmethod
+    def dlayer_dweights_func(in_,weights_in,weights_out):
+        doutput_dweights_in = weights_out * np.square(in_) * np.pi * np.cos(np.pi*in_*weights_in)
+        doutput_dweights_out = in_*np.sin(np.pi*in_*weights_in)
+        return doutput_dweights_in,doutput_dweights_out
+
+    def forward(self,input):
+        input = input.flatten()
+        if type(self.weights_in) == bool:
+            self.weights_in = np.random.uniform(-0.3, 0.3,(self.layer_size,input.shape[0]))
+            self.weights_out = np.random.uniform(-0.3, 0.3,(self.layer_size,input.shape[0]))
+        
+        self.last_input = input
+        out = np.sum(self.weights_out*input*np.sin(np.pi*input*self.weights_in),axis = 1)
+        self.out = out
+        return out
+    
+    def backprop(self,derror_dout,learning_rate = 0.05):
+        last_input = self.last_input
+        last_weights_in = self.weights_in
+        last_weights_out = self.weights_out
+        
+        dout_dlayer = self.dlayer_dlayer_func(last_input,last_weights_in,last_weights_out)
+        dout_dweights_in,dout_dweights_out = self.dlayer_dweights_func(last_input,last_weights_in,last_weights_out)
+        
+        derror_dlayer = np.dot(derror_dout,dout_dlayer)
+        derror_dweights_in = derror_dout*dout_dweights_in.T
+        derror_dweights_out = derror_dout*dout_dweights_out.T
+        
+        self.weights_in += derror_dweights_in.T*learning_rate
+        self.weights_out += derror_dweights_out.T*learning_rate
+        return derror_dlayer
